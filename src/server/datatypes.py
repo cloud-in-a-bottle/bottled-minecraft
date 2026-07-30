@@ -33,6 +33,7 @@ class ServerState:
 class StartRequest:
     world: str
     memory_mb: int
+    jvm_args: str = ""
 
 
 @attr.s(auto_attribs=True, frozen=True)

@@ -419,6 +419,15 @@ function renderServerCard(s) {
     </div>`;
 }
 
+let jvmMode = false;
+function toggleJvmMode() {
+    jvmMode = !jvmMode;
+    document.getElementById('memory').style.display = jvmMode ? 'none' : '';
+    document.getElementById('jvm-args').style.display = jvmMode ? '' : 'none';
+    document.getElementById('mem-mode-label').textContent = jvmMode ? 'JVM arguments' : 'Memory (MB)';
+    document.getElementById('mem-mode-toggle').textContent = jvmMode ? 'Simple: memory' : 'Advanced: JVM args';
+}
+
 async function startServer() {
     clearError();
     const r = await fetch('/api/server/start', {
@@ -426,7 +435,8 @@ async function startServer() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
             world: document.getElementById('world').value,
-            memory_mb: parseInt(document.getElementById('memory').value),
+            memory_mb: jvmMode ? 0 : parseInt(document.getElementById('memory').value),
+            jvm_args: jvmMode ? document.getElementById('jvm-args').value : '',
         }),
     });
     if (!r.ok) { showError(await apiErrorDetail(r)); return; }

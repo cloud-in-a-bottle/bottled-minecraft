@@ -13,6 +13,8 @@ from server.datatypes import ServerPerfStats
 from server.datatypes import StartRequest
 from server.java import ensure_java
 from server.java import required_java_version
+from server.jvm import heap_flags
+from server.jvm import parse_jvm_args
 from server.mod_loaders import ensure_loader
 from server.mod_loaders import get_launch_cmd
 from server.sessions import allocate_session_id
@@ -56,6 +58,7 @@ class MinecraftServer:
         self._version = get_version(start_req.world)
         self._port: int = get_world_port(start_req.world)
         self._mod_loader, self._loader_version = get_world_loader_info(start_req.world)
+        self._jvm_args: list[str] = parse_jvm_args(start_req.jvm_args)
         self._process: asyncio.subprocess.Process | None = None
         self._psutil_proc: psutil.Process | None = None
         self._start_time: float | None = None
@@ -77,8 +80,8 @@ class MinecraftServer:
             jar = version_jar_path(self._version).resolve()
             cmd: list[str] = [
                 str(java_bin),
-                f"-Xmx{self._memory_mb}M",
-                f"-Xms{self._memory_mb}M",
+                *heap_flags(self._memory_mb, self._jvm_args),
+                *self._jvm_args,
                 "-jar",
                 str(jar),
                 "--nogui",
@@ -88,7 +91,13 @@ class MinecraftServer:
             mc_version = get_version_string(self._version)
             await ensure_loader(world_dir, mc_version, self._mod_loader, self._loader_version, java_bin)
             cmd, extra_env = get_launch_cmd(
-                world_dir, mc_version, self._mod_loader, self._loader_version, self._memory_mb, java_bin
+                world_dir,
+                mc_version,
+                self._mod_loader,
+                self._loader_version,
+                self._memory_mb,
+                java_bin,
+                self._jvm_args,
             )
             proc_env = {**os.environ, **extra_env} if extra_env else None
 

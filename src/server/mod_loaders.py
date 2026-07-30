@@ -7,6 +7,8 @@ from pathlib import Path
 
 import httpx
 
+from server.jvm import heap_flags
+
 
 async def fetch_loader_versions(loader: str, mc_version: str) -> list[str]:
     if loader == "fabric":
@@ -205,33 +207,34 @@ def _make_executable(path: Path) -> None:
 
 
 def get_launch_cmd(
-    world_dir: Path, mc_version: str, mod_loader: str, loader_version: str, memory_mb: int, java_bin: Path
+    world_dir: Path,
+    mc_version: str,
+    mod_loader: str,
+    loader_version: str,
+    memory_mb: int,
+    java_bin: Path,
+    jvm_args: list[str],
 ) -> tuple[list[str], dict[str, str]]:
     """Return (argv, extra_env) for launching a modded server process."""
+    mem = heap_flags(memory_mb, jvm_args)
     if mod_loader == "fabric":
         jar = _fabric_jar_cache_path(mc_version, loader_version)
-        return (
-            [str(java_bin), f"-Xmx{memory_mb}M", f"-Xms{memory_mb}M", "-jar", str(jar), "--nogui"],
-            {},
-        )
+        return ([str(java_bin), *mem, *jvm_args, "-jar", str(jar), "--nogui"], {})
     if mod_loader in ("forge", "neoforge"):
         run_sh = world_dir / "run.sh"
         if run_sh.exists():
-            _write_jvm_args(world_dir / "user_jvm_args.txt", memory_mb)
+            _write_jvm_args(world_dir / "user_jvm_args.txt", mem, jvm_args)
             extra_env = {"PATH": str(java_bin.parent) + ":" + os.environ.get("PATH", "")}
             return (["/bin/sh", str(run_sh), "--nogui"], extra_env)
         candidates = list(world_dir.glob("forge-*-universal.jar")) + list(world_dir.glob("forge-*-server.jar"))
         if not candidates:
             raise RuntimeError(f"No {mod_loader} server found in {world_dir} — installation may have failed")
-        return (
-            [str(java_bin), f"-Xmx{memory_mb}M", f"-Xms{memory_mb}M", "-jar", str(candidates[0]), "--nogui"],
-            {},
-        )
+        return ([str(java_bin), *mem, *jvm_args, "-jar", str(candidates[0]), "--nogui"], {})
     raise ValueError(f"Unknown mod loader: {mod_loader!r}")
 
 
-def _write_jvm_args(path: Path, memory_mb: int) -> None:
-    path.write_text(f"-Xmx{memory_mb}M\n-Xms{memory_mb}M\n")
+def _write_jvm_args(path: Path, mem_flags: list[str], jvm_args: list[str]) -> None:
+    path.write_text("\n".join([*mem_flags, *jvm_args]) + "\n")
 
 
 def cleanup_loader_files(world_dir: Path, loader: str) -> None:
