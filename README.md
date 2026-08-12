@@ -1,4 +1,4 @@
-# openhost-minecraft-server
+# bottled-minecraft
 Supports running Minecraft servers out of the box. 
 - Version 1.12+
 - Multiple servers at once
