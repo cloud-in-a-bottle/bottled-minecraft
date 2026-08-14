@@ -1,5 +1,5 @@
 [app]
-name = "openhost-minecraft-server"
+name = "minecraft"
 version = "1.0.0"
 description = "A self-hosted minecraft server runner"
 
