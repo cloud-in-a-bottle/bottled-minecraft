@@ -15,7 +15,7 @@ health_check = "/health"
 
 [resources]
 memory_mb = 16384
-cpu_millicores = 10000
+cpu_cores = 10.0
 
 [[ports]]
 label = "mc-0"
