@@ -155,7 +155,7 @@ async def _run_installer(world_dir: Path, java_bin: Path, installer_path: Path) 
 
 
 async def _ensure_forge(world_dir: Path, mc_version: str, forge_version: str, java_bin: Path) -> None:
-    if (world_dir / "run.sh").exists() or list(world_dir.glob("forge-*-universal.jar")):
+    if (world_dir / "run.sh").exists() or list(world_dir.glob("forge-*-universal.jar")) or [p for p in world_dir.glob("forge-*.jar") if not p.name.endswith("-installer.jar")]:
         return
     installer_name = f"forge-{mc_version}-{forge_version}-installer.jar"
     url = f"https://maven.minecraftforge.net/net/minecraftforge/forge/{mc_version}-{forge_version}/{installer_name}"
@@ -226,7 +226,7 @@ def get_launch_cmd(
             _write_jvm_args(world_dir / "user_jvm_args.txt", mem, jvm_args)
             extra_env = {"PATH": str(java_bin.parent) + ":" + os.environ.get("PATH", "")}
             return (["/bin/sh", str(run_sh), "--nogui"], extra_env)
-        candidates = list(world_dir.glob("forge-*-universal.jar")) + list(world_dir.glob("forge-*-server.jar"))
+        candidates = list(world_dir.glob("forge-*-universal.jar")) + list(world_dir.glob("forge-*-server.jar")) + [p for p in world_dir.glob("forge-*.jar") if not p.name.endswith("-installer.jar")]
         if not candidates:
             raise RuntimeError(f"No {mod_loader} server found in {world_dir} — installation may have failed")
         return ([str(java_bin), *mem, *jvm_args, "-jar", str(candidates[0]), "--nogui"], {})
