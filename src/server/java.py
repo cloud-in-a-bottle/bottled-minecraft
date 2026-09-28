@@ -41,7 +41,7 @@ def _java_bin(java_version: int) -> Path:
     if not base.exists():
         raise FileNotFoundError(f"No JREs cached at {base}")
     for entry in sorted(base.iterdir()):
-        if entry.is_dir() and entry.name.startswith(f"jdk-{java_version}."):
+        if entry.is_dir() and entry.name.startswith((f"jdk-{java_version}.", f"jdk{java_version}u")):
             for candidate in entry.rglob("bin/java"):
                 if candidate.is_file():
                     return candidate.resolve()

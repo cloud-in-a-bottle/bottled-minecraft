@@ -37,6 +37,32 @@ class StartRequest:
 
 
 @attr.s(auto_attribs=True, frozen=True)
+class RunRequest:
+    """One-click launch of a config using its saved launch settings + active save."""
+
+    world: str
+
+
+@attr.s(auto_attribs=True, frozen=True)
+class LaunchSettings:
+    memory_mb: int = 4096
+    jvm_args: str = ""
+    flags_preset: str = "aikar"  # "aikar" | "custom" | "none"
+
+
+@attr.s(auto_attribs=True, frozen=True)
+class SaveInfo:
+    name: str
+    active: bool
+    generated: bool  # has a level.dat on disk (vs. a pending name that generates on next launch)
+
+
+@attr.s(auto_attribs=True, frozen=True)
+class SaveRequest:
+    save: str
+
+
+@attr.s(auto_attribs=True, frozen=True)
 class CommandRequest:
     session_id: int
     command: str

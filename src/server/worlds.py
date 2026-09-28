@@ -2,6 +2,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import zipfile
@@ -10,6 +11,8 @@ from pathlib import Path
 
 import httpx
 
+from server.datatypes import LaunchSettings
+from server.datatypes import SaveInfo
 from server.datatypes import WorldInfo
 from server.version_data import VERSION_MAP
 
@@ -42,6 +45,12 @@ def _db() -> Iterator[sqlite3.Connection]:
     for col, defn in [
         ("mod_loader", "TEXT NOT NULL DEFAULT 'vanilla'"),
         ("mod_loader_version", "TEXT NOT NULL DEFAULT ''"),
+        # Persisted launch settings — so args no longer need re-entering every start.
+        ("memory_mb", "INTEGER NOT NULL DEFAULT 4096"),
+        ("jvm_args", "TEXT NOT NULL DEFAULT ''"),
+        ("flags_preset", "TEXT NOT NULL DEFAULT 'aikar'"),
+        # Which save (level-name subfolder) this config launches.
+        ("active_world", "TEXT NOT NULL DEFAULT 'world'"),
     ]:
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE worlds ADD COLUMN {col} {defn}")
@@ -153,6 +162,93 @@ def get_world_loader_info(name: str) -> tuple[str, str]:
     if row is None:
         raise KeyError(f"No loader info found for world {name!r}")
     return row[0], row[1]
+
+
+# ── Launch settings (persisted per config) ─────────────────────────────
+
+def get_launch_settings(name: str) -> LaunchSettings:
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT memory_mb, jvm_args, flags_preset FROM worlds WHERE name = ?", (name,)
+        ).fetchone()
+    if row is None:
+        return LaunchSettings()
+    return LaunchSettings(memory_mb=int(row[0]), jvm_args=row[1], flags_preset=row[2])
+
+
+def save_launch_settings(name: str, memory_mb: int, jvm_args: str, flags_preset: str) -> None:
+    if flags_preset not in ("aikar", "custom", "none"):
+        raise ValueError(f"Unknown flags preset: {flags_preset!r}")
+    with _db() as conn:
+        conn.execute(
+            "UPDATE worlds SET memory_mb = ?, jvm_args = ?, flags_preset = ? WHERE name = ?",
+            (memory_mb, jvm_args, flags_preset, name),
+        )
+
+
+# ── Saves (level-name subfolders within a config) ──────────────────────
+
+# Top-level dirs inside a config that are infrastructure, never a save.
+_RESERVED_DIRS = {
+    "mods", "config", "defaultconfigs", "kubejs", "scripts", "libraries",
+    "logs", "crash-reports", "versions", "cache",
+}
+_SAVE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\- ]*$")
+
+
+def _validate_save_name(save: str) -> None:
+    if not _SAVE_NAME_RE.match(save) or save in _RESERVED_DIRS:
+        raise ValueError(
+            "Save name must start with a letter or digit, contain only letters, digits, "
+            "spaces, hyphens or underscores, and not be a reserved folder name"
+        )
+
+
+def get_active_world(name: str) -> str:
+    with _db() as conn:
+        row = conn.execute("SELECT active_world FROM worlds WHERE name = ?", (name,)).fetchone()
+    if row is None or not row[0]:
+        return "world"
+    return row[0]
+
+
+def set_active_world(name: str, save: str) -> None:
+    _validate_save_name(save)
+    with _db() as conn:
+        conn.execute("UPDATE worlds SET active_world = ? WHERE name = ?", (save, name))
+
+
+def list_saves(name: str) -> list[SaveInfo]:
+    """Saves are top-level subfolders that contain a level.dat, plus the (possibly not-yet-generated) active save."""
+    active = get_active_world(name)
+    d = world_dir(name)
+    saves: list[SaveInfo] = []
+    seen: set[str] = set()
+    if d.exists():
+        for p in sorted(d.iterdir()):
+            if p.is_dir() and p.name not in _RESERVED_DIRS and (p / "level.dat").exists():
+                saves.append(SaveInfo(name=p.name, active=(p.name == active), generated=True))
+                seen.add(p.name)
+    if active not in seen:
+        saves.append(SaveInfo(name=active, active=True, generated=False))
+    return saves
+
+
+def create_save(name: str, save: str) -> None:
+    """Register a new save name and make it active; Minecraft generates it on the next launch."""
+    _validate_save_name(save)
+    if (world_dir(name) / save / "level.dat").exists():
+        raise ValueError(f"Save {save!r} already exists")
+    set_active_world(name, save)
+
+
+def delete_save(name: str, save: str) -> None:
+    if save == get_active_world(name):
+        raise ValueError("Cannot delete the active save — switch to another save first")
+    p = world_dir(name) / save
+    if not (p.is_dir() and (p / "level.dat").exists()):
+        raise ValueError(f"Save {save!r} not found")
+    shutil.rmtree(p)
 
 
 def delete_world(name: str) -> None:

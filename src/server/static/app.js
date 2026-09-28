@@ -181,25 +181,199 @@ async function loadDownloadedJavaVersions() {
         : '<span class="tag-empty">None downloaded yet</span>';
 }
 
-async function loadWorlds() {
-    const worlds = await fetch('/api/worlds').then(r => r.json());
+// ── Server configurations (Start Server tab) ───────────────────────
+
+const RUNNING_STATUSES = ['running', 'stopping', 'saving'];
+
+async function loadConfigs() {
+    const [worlds, servers] = await Promise.all([
+        fetch('/api/worlds').then(r => r.json()),
+        fetch('/api/servers').then(r => r.json()),
+    ]);
     usedPorts = new Set(worlds.map(w => w.port).filter(p => p > 0));
-    const sel = document.getElementById('world');
-    const startBtn = document.getElementById('start-btn');
-    if (worlds.length) {
-        sel.innerHTML = worlds.map(w => {
-            const loaderStr = w.mod_loader && w.mod_loader !== 'vanilla'
-                ? ` · ${escapeHtml(w.mod_loader)} ${escapeHtml(w.mod_loader_version)}`
-                : '';
-            return `<option value="${w.name}">${w.name} (${escapeHtml(reverseVersionMap[w.version] || String(w.version))}${loaderStr} · port ${w.port})</option>`;
-        }).join('');
-        sel.classList.remove('empty');
-        startBtn.disabled = false;
-    } else {
-        sel.innerHTML = '<option disabled selected>No worlds yet</option>';
-        sel.classList.add('empty');
-        startBtn.disabled = true;
+    const running = new Set(servers.filter(s => RUNNING_STATUSES.includes(s.status)).map(s => s.world));
+    const list = document.getElementById('config-list');
+    if (!worlds.length) {
+        list.innerHTML = '<div class="empty">No configurations yet. Create one with “+ New”.</div>';
+        return;
     }
+    list.innerHTML = worlds.map(w => renderConfigItem(w, running.has(w.name))).join('');
+}
+
+function renderConfigItem(w, running) {
+    const versionStr = escapeHtml(reverseVersionMap[w.version] || String(w.version));
+    const loaderStr = w.mod_loader && w.mod_loader !== 'vanilla'
+        ? ` · ${escapeHtml(w.mod_loader)} ${escapeHtml(w.mod_loader_version)}` : '';
+    const n = jsAttr(w.name);
+    return `
+    <div class="config-item" data-world="${escapeHtml(w.name)}">
+        <div class="server-card">
+            <div class="server-meta">
+                <div class="server-title">${escapeHtml(w.name)}</div>
+                <div class="server-detail">${versionStr}${loaderStr} &middot; port ${w.port}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+                <span class="badge running cfg-running-badge" style="${running ? '' : 'display:none'}">Running</span>
+                <button class="btn-primary cfg-run-btn" onclick="runConfig(${n})" ${running ? 'disabled' : ''}>▶ Run</button>
+                <button onclick="toggleConfigSettings(this, ${n})">Settings</button>
+            </div>
+        </div>
+        <div class="config-settings" style="display:none"></div>
+    </div>`;
+}
+
+function updateConfigRunning(servers) {
+    const running = new Set(servers.filter(s => RUNNING_STATUSES.includes(s.status)).map(s => s.world));
+    document.querySelectorAll('#config-list .config-item').forEach(item => {
+        const isR = running.has(item.getAttribute('data-world'));
+        const badge = item.querySelector('.cfg-running-badge');
+        const btn = item.querySelector('.cfg-run-btn');
+        if (badge) badge.style.display = isR ? '' : 'none';
+        if (btn) btn.disabled = isR;
+    });
+}
+
+async function runConfig(name) {
+    clearError();
+    const r = await fetch('/api/server/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({world: name}),
+    });
+    if (!r.ok) { showError(await apiErrorDetail(r)); return; }
+    await refreshServers();
+    switchTab('servers');
+}
+
+async function toggleConfigSettings(btn, name) {
+    const panel = btn.closest('.config-item').querySelector('.config-settings');
+    if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    panel.innerHTML = '<div class="config-panel"><div class="empty">Loading…</div></div>';
+    await renderConfigPanel(panel, name);
+}
+
+async function renderConfigPanel(panel, name) {
+    const [ls, saves] = await Promise.all([
+        fetch(`/api/worlds/${encodeURIComponent(name)}/launch-settings`).then(r => r.json()),
+        fetch(`/api/worlds/${encodeURIComponent(name)}/saves`).then(r => r.json()),
+    ]);
+    const n = jsAttr(name);
+    const sel = p => ls.flags_preset === p ? ' selected' : '';
+    panel.innerHTML = `
+    <div class="config-panel">
+        <div class="field">
+            <label>Memory (MB)</label>
+            <input type="number" class="cfg-mem" value="${ls.memory_mb}" min="1024" max="65536" step="512">
+        </div>
+        <div class="field">
+            <label>JVM flags preset</label>
+            <select class="cfg-preset" onchange="onCfgPresetChange(this)">
+                <option value="aikar"${sel('aikar')}>Aikar's flags (recommended)</option>
+                <option value="none"${sel('none')}>None (just -Xmx / -Xms)</option>
+                <option value="custom"${sel('custom')}>Custom JVM args</option>
+            </select>
+        </div>
+        <div class="field cfg-custom-row" style="${ls.flags_preset === 'custom' ? '' : 'display:none'}">
+            <label>Custom JVM args</label>
+            <textarea class="cfg-jvm" rows="3" spellcheck="false" style="font-family:monospace;font-size:0.85rem;resize:vertical">${escapeHtml(ls.jvm_args)}</textarea>
+        </div>
+        <button class="btn-primary cfg-save-btn" onclick="saveConfigSettings(this, ${n})">Save settings</button>
+
+        <hr style="border:none;border-top:1px solid #e8e8e8;margin:16px 0">
+        <label>Saves <span class="help" title="A save is a level-name folder inside this config. All saves share the same mods and settings; switch which one launches.">?</span></label>
+        <div class="cfg-saves">${renderSaves(saves, name)}</div>
+        <div class="row" style="margin-top:8px">
+            <input type="text" class="cfg-new-save" placeholder="new-save-name">
+            <button onclick="createSaveFromPanel(this, ${n})">+ Add save</button>
+        </div>
+    </div>`;
+}
+
+function renderSaves(saves, name) {
+    const grp = 'save-' + String(name).replace(/[^a-zA-Z0-9]/g, '');
+    return saves.map(s => {
+        const n = jsAttr(name), sv = jsAttr(s.name);
+        const pending = s.generated ? '' : ' <span style="color:#999;font-size:0.8rem">(new — generates on launch)</span>';
+        const del = (!s.active && s.generated)
+            ? `<button onclick="deleteSaveFromPanel(this, ${n}, ${sv})" style="font-size:0.8rem">Delete</button>` : '';
+        return `
+        <div class="save-row">
+            <label class="checkbox-label">
+                <input type="radio" name="${grp}" ${s.active ? 'checked' : ''} onchange="setActiveSave(this, ${n}, ${sv})">
+                ${escapeHtml(s.name)}${s.active ? ' <span class="badge">active</span>' : ''}${pending}
+            </label>
+            ${del}
+        </div>`;
+    }).join('');
+}
+
+function onCfgPresetChange(selectEl) {
+    const row = selectEl.closest('.config-panel').querySelector('.cfg-custom-row');
+    row.style.display = selectEl.value === 'custom' ? '' : 'none';
+}
+
+async function saveConfigSettings(btn, name) {
+    clearError();
+    const panel = btn.closest('.config-panel');
+    const body = {
+        memory_mb: parseInt(panel.querySelector('.cfg-mem').value) || 4096,
+        flags_preset: panel.querySelector('.cfg-preset').value,
+        jvm_args: panel.querySelector('.cfg-jvm').value,
+    };
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    const r = await fetch(`/api/worlds/${encodeURIComponent(name)}/launch-settings`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+    });
+    btn.disabled = false;
+    if (!r.ok) { btn.textContent = 'Save settings'; showError(await apiErrorDetail(r)); return; }
+    btn.textContent = 'Saved!';
+    setTimeout(() => { btn.textContent = 'Save settings'; }, 2000);
+}
+
+async function _refreshPanel(el, name) {
+    const panel = el.closest('.config-settings');
+    if (panel) await renderConfigPanel(panel, name);
+}
+
+async function setActiveSave(el, name, save) {
+    clearError();
+    const r = await fetch(`/api/worlds/${encodeURIComponent(name)}/saves/active`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({save}),
+    });
+    if (!r.ok) showError(await apiErrorDetail(r));
+    await _refreshPanel(el, name);
+}
+
+async function createSaveFromPanel(btn, name) {
+    clearError();
+    const input = btn.closest('.config-panel').querySelector('.cfg-new-save');
+    const save = input.value.trim();
+    if (!save) return;
+    const r = await fetch(`/api/worlds/${encodeURIComponent(name)}/saves`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({save}),
+    });
+    if (!r.ok) { showError(await apiErrorDetail(r)); return; }
+    await _refreshPanel(btn, name);
+}
+
+async function deleteSaveFromPanel(btn, name, save) {
+    clearError();
+    if (!confirm(`Delete save “${save}”? This permanently removes that world's files.`)) return;
+    const r = await fetch(`/api/worlds/${encodeURIComponent(name)}/saves/delete`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({save}),
+    });
+    if (!r.ok) { showError(await apiErrorDetail(r)); return; }
+    await _refreshPanel(btn, name);
 }
 
 // ── Past sessions ──────────────────────────────────────────────────
@@ -340,8 +514,7 @@ async function createWorld() {
 
     if (!r.ok) { showError(await apiErrorDetail(r)); return; }
     toggleNewWorld();
-    await Promise.all([loadWorlds(), loadDownloadedVersions(), loadDownloadedJavaVersions()]);
-    document.getElementById('world').value = name;
+    await Promise.all([loadConfigs(), loadDownloadedVersions(), loadDownloadedJavaVersions()]);
 }
 
 // ── Server list ────────────────────────────────────────────────────
@@ -417,31 +590,6 @@ function renderServerCard(s) {
             ${s.status !== 'saved' ? '<span class="spinner"></span>' : ''}
         </div>
     </div>`;
-}
-
-let jvmMode = false;
-function toggleJvmMode() {
-    jvmMode = !jvmMode;
-    document.getElementById('memory').style.display = jvmMode ? 'none' : '';
-    document.getElementById('jvm-args').style.display = jvmMode ? '' : 'none';
-    document.getElementById('mem-mode-label').textContent = jvmMode ? 'JVM arguments' : 'Memory (MB)';
-    document.getElementById('mem-mode-toggle').textContent = jvmMode ? 'Simple: memory' : 'Advanced: JVM args';
-}
-
-async function startServer() {
-    clearError();
-    const r = await fetch('/api/server/start', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            world: document.getElementById('world').value,
-            memory_mb: jvmMode ? 0 : parseInt(document.getElementById('memory').value),
-            jvm_args: jvmMode ? document.getElementById('jvm-args').value : '',
-        }),
-    });
-    if (!r.ok) { showError(await apiErrorDetail(r)); return; }
-    await refreshServers();
-    switchTab('servers');
 }
 
 async function dismissServer(sessionId) {
@@ -655,8 +803,7 @@ async function importWorld() {
 
     if (!r.ok) { showError(await apiErrorDetail(r)); return; }
     toggleImportWorld();
-    await Promise.all([loadWorlds(), loadDownloadedVersions()]);
-    document.getElementById('world').value = name;
+    await Promise.all([loadConfigs(), loadDownloadedVersions()]);
 }
 
 // ── World Customization tab ────────────────────────────────────────
@@ -837,7 +984,7 @@ async function applyJarChange() {
         modsLink.style.display = 'none';
     }
 
-    await Promise.all([loadWorlds(), loadDownloadedVersions()]);
+    await Promise.all([loadConfigs(), loadDownloadedVersions()]);
     document.getElementById('change-jar-form').classList.remove('open');
     await loadCustomizeWorlds();
 }
@@ -890,18 +1037,19 @@ async function saveServerSettings() {
 
 // ── Init ───────────────────────────────────────────────────────────
 
-loadVersionMap();
+loadVersionMap().then(loadConfigs);
 loadNewWorldVersions();
 loadAvailableVersions();
 loadDownloadedVersions();
 loadDownloadedJavaVersions();
-loadWorlds();
 refreshServers();
 
 const _serverEvents = new EventSource('/api/servers/events');
 _serverEvents.onmessage = (e) => {
     const servers = JSON.parse(e.data);
     console.log('[SSE] servers update', servers);
+
+    updateConfigRunning(servers);
 
     if (detailSessionId !== null) {
         const current = servers.find(s => s.session_id === detailSessionId);
