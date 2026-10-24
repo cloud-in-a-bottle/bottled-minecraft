@@ -21,7 +21,7 @@ dev = [
     "pytest-playwright",
     "playwright",
     "httpx>=0.27",
-    "openhost @ git+https://github.com/imbue-openhost/openhost@main",
+    "openhost[test-harness] @ git+https://github.com/cloud-in-a-bottle/cloud-in-a-bottle@main",
 ]
 
 [build-system]

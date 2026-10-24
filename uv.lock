@@ -819,8 +819,8 @@ wheels = [
 
 [[package]]
 name = "openhost"
-version = "0.1.0"
-source = { git = "https://github.com/imbue-openhost/openhost?rev=main#f185d88ae8b8f05b9ba60c8fce2a049ad77c218f" }
+version = "0.3.0rc1"
+source = { git = "https://github.com/cloud-in-a-bottle/cloud-in-a-bottle?rev=main#445237109b17a42a5d11e61b2b8b5554cb6ab9a1" }
 dependencies = [
     { name = "acme" },
     { name = "argon2-cffi" },
@@ -843,9 +843,18 @@ dependencies = [
     { name = "packaging" },
     { name = "pygments" },
     { name = "pyjwt", extra = ["crypto"] },
+    { name = "pyyaml" },
     { name = "tomli-w" },
     { name = "typed-settings" },
     { name = "websockets" },
+]
+
+[package.optional-dependencies]
+test-harness = [
+    { name = "playwright" },
+    { name = "pytest" },
+    { name = "pytest-playwright" },
+    { name = "requests" },
 ]
 
 [[package]]
@@ -865,7 +874,7 @@ dependencies = [
 dev = [
     { name = "httpx" },
     { name = "mypy" },
-    { name = "openhost" },
+    { name = "openhost", extra = ["test-harness"] },
     { name = "playwright" },
     { name = "pre-commit" },
     { name = "pytest" },
@@ -887,7 +896,7 @@ requires-dist = [
 dev = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "mypy" },
-    { name = "openhost", git = "https://github.com/imbue-openhost/openhost?rev=main" },
+    { name = "openhost", extras = ["test-harness"], git = "https://github.com/cloud-in-a-bottle/cloud-in-a-bottle?rev=main" },
     { name = "playwright" },
     { name = "pre-commit" },
     { name = "pytest", specifier = ">=8.0" },
