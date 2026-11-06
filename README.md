@@ -9,6 +9,8 @@ Create new worlds at supported versions at any time. Each version JAR is downloa
 
 Supports running arbitrary numbers of servers as long as there are ports. Each one can be assigned a certain amount of memory. 
 
+`cloudinabottle.toml` sets `prebuilt_image`, so Cloud in a Bottle pulls our signed prebuilt image (built by CI from each release tag) instead of building the Dockerfile. To fork and modify this app, comment out `prebuilt_image` so your instance builds from source.
+
 ## directory structure
 - app-data/jre: the different JREs are stored here. Specific structure depends on OS. 
 - app-data/versions: different Minecraft JARs are stored here.
