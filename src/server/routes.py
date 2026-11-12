@@ -26,12 +26,17 @@ from litestar.status_codes import HTTP_500_INTERNAL_SERVER_ERROR
 
 from server.datatypes import CommandRequest
 from server.datatypes import JavaRequirement
+from server.datatypes import LaunchSettings
+from server.datatypes import RunRequest
+from server.datatypes import SaveInfo
+from server.datatypes import SaveRequest
 from server.datatypes import ServerPerfStats
 from server.datatypes import ServerState
 from server.datatypes import StartRequest
 from server.datatypes import WorldInfo
 from server.datatypes import WorldJarUpdate
 from server.java import ensure_java
+from server.jvm import effective_jvm_args
 from server.java import is_java_downloaded
 from server.java import list_downloaded_java_versions
 from server.java import required_java_version
@@ -47,18 +52,25 @@ from server.state import AppState
 from server.version_data import VERSION_MAP
 from server.worlds import MINECRAFT_PORTS
 from server.worlds import assign_world_port
+from server.worlds import create_save
 from server.worlds import create_world
+from server.worlds import delete_save
 from server.worlds import delete_world
 from server.worlds import ensure_version
 from server.worlds import fetch_available_versions
+from server.worlds import get_active_world
 from server.worlds import get_data_version
+from server.worlds import get_launch_settings
 from server.worlds import get_version_string
 from server.worlds import get_world
 from server.worlds import import_world_from_zip
 from server.worlds import list_downloaded_versions
+from server.worlds import list_saves
 from server.worlds import read_jar_data_version
 from server.worlds import read_world_config
+from server.worlds import save_launch_settings
 from server.worlds import save_world_info
+from server.worlds import set_active_world
 from server.worlds import version_jar_path
 from server.worlds import world_dir
 from server.worlds import write_world_config
@@ -228,19 +240,24 @@ def api_status(app_state: AppState, session_id: int) -> bool:
     raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"No server with session id {session_id}")
 
 
-@post("/api/server/start")
-async def api_start(data: StartRequest, app_state: AppState) -> bool:
-    if any(s.is_running() and s.get_world() == data.world for s in app_state.servers):
-        raise HTTPException(status_code=HTTP_409_CONFLICT, detail=f"World '{data.world}' is already running")
-    world = get_world(data.world)
-    if world is None:
-        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"World '{data.world}' not found")
+async def _launch(app_state: AppState, world_name: str, memory_mb: int, jvm_args: str) -> bool:
+    """Shared launch path: point the config at its active save, start the server, wire up lifecycle."""
+    if any(s.is_running() and s.get_world() == world_name for s in app_state.servers):
+        raise HTTPException(status_code=HTTP_409_CONFLICT, detail=f"World '{world_name}' is already running")
+    if get_world(world_name) is None:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"World '{world_name}' not found")
+
+    # Point server.properties at the active save (level-name) before launch.
+    try:
+        write_world_config(world_name, {"level-name": get_active_world(world_name)})
+    except OSError as e:
+        raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
     try:
-        new_server = MinecraftServer(data)
+        new_server = MinecraftServer(StartRequest(world=world_name, memory_mb=memory_mb, jvm_args=jvm_args))
     except Exception as e:
         raise HTTPException(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=f"server startup failed for '{data.world} failed"
+            status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=f"server startup failed for '{world_name}'"
         ) from e
 
     app_state.servers.append(new_server)
@@ -252,6 +269,79 @@ async def api_start(data: StartRequest, app_state: AppState) -> bool:
     app_state.notify_servers_changed()
     asyncio.create_task(_crash_lifecycle(app_state, new_server))
     return new_server.is_running()
+
+
+@post("/api/server/start")
+async def api_start(data: StartRequest, app_state: AppState) -> bool:
+    return await _launch(app_state, data.world, data.memory_mb, data.jvm_args)
+
+
+@post("/api/server/run")
+async def api_run(data: RunRequest, app_state: AppState) -> bool:
+    """One-click launch using the config's saved launch settings + active save."""
+    if get_world(data.world) is None:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"World '{data.world}' not found")
+    ls = get_launch_settings(data.world)
+    jvm = effective_jvm_args(ls.memory_mb, ls.jvm_args, ls.flags_preset)
+    return await _launch(app_state, data.world, ls.memory_mb, jvm)
+
+
+@get("/api/worlds/{name:str}/launch-settings", sync_to_thread=False)
+def api_get_launch_settings(name: str) -> LaunchSettings:
+    if get_world(name) is None:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"World '{name}' not found")
+    return get_launch_settings(name)
+
+
+@post("/api/worlds/{name:str}/launch-settings", status_code=HTTP_204_NO_CONTENT)
+async def api_save_launch_settings(name: str, data: LaunchSettings) -> None:
+    if get_world(name) is None:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"World '{name}' not found")
+    try:
+        save_launch_settings(name, data.memory_mb, data.jvm_args, data.flags_preset)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@get("/api/worlds/{name:str}/saves", sync_to_thread=False)
+def api_list_saves(name: str) -> list[SaveInfo]:
+    if get_world(name) is None:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"World '{name}' not found")
+    return list_saves(name)
+
+
+@post("/api/worlds/{name:str}/saves", status_code=HTTP_201_CREATED)
+async def api_create_save(name: str, data: SaveRequest) -> None:
+    if get_world(name) is None:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"World '{name}' not found")
+    try:
+        create_save(name, data.save)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@post("/api/worlds/{name:str}/saves/active", status_code=HTTP_204_NO_CONTENT)
+async def api_set_active_save(name: str, data: SaveRequest, app_state: AppState) -> None:
+    if get_world(name) is None:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"World '{name}' not found")
+    if any(s.is_running() and s.get_world() == name for s in app_state.servers):
+        raise HTTPException(status_code=HTTP_409_CONFLICT, detail="Stop the server before switching saves")
+    try:
+        set_active_world(name, data.save)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@post("/api/worlds/{name:str}/saves/delete", status_code=HTTP_204_NO_CONTENT)
+async def api_delete_save(name: str, data: SaveRequest, app_state: AppState) -> None:
+    if get_world(name) is None:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"World '{name}' not found")
+    if any(s.is_running() and s.get_world() == name for s in app_state.servers):
+        raise HTTPException(status_code=HTTP_409_CONFLICT, detail=f"World '{name}' is currently running")
+    try:
+        delete_save(name, data.save)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
 @get("/api/server/logs", sync_to_thread=False)

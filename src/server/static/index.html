@@ -68,6 +68,19 @@
         #detail-badge { font-size: 0.9rem; padding: 4px 12px; }
         .empty { color: #999; font-size: 0.9rem; padding: 12px 0; }
 
+        /* Config list + inline settings panel */
+        .config-item { display: flex; flex-direction: column; }
+        .config-panel {
+            background: #f5f5f5;
+            border-radius: 0 0 6px 6px;
+            padding: 14px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+        }
+        .config-panel .field { margin-bottom: 10px; }
+        .save-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+        .save-row .checkbox-label { flex: 1; }
+        textarea { width: 100%; box-sizing: border-box; }
+
         /* Form */
         .field { margin-bottom: 14px; }
         label { display: block; font-size: 0.85rem; color: #555; margin-bottom: 4px; }
@@ -287,11 +300,12 @@
 
         <div id="tab-start" class="tab-content">
             <div class="field">
-                <label>World</label>
-                <div class="row">
-                    <select id="world"><option disabled selected>Loading...</option></select>
-                    <button onclick="toggleNewWorld()">+ New</button>
-                    <button onclick="toggleImportWorld()">Import</button>
+                <div class="row" style="justify-content:space-between;align-items:center">
+                    <label style="margin:0">Server configurations</label>
+                    <div style="display:flex;gap:8px">
+                        <button onclick="toggleNewWorld()">+ New</button>
+                        <button onclick="toggleImportWorld()">Import</button>
+                    </div>
                 </div>
                 <div class="new-world" id="import-world-form">
                     <input type="text" id="import-world-name" placeholder="world-name" oninput="updateImportBtn()">
@@ -351,16 +365,9 @@
                 </div>
             </div>
 
-            <div class="field">
-                <div class="row" style="justify-content:space-between;align-items:center">
-                    <label id="mem-mode-label" style="margin:0">Memory (MB)</label>
-                    <button type="button" id="mem-mode-toggle" onclick="toggleJvmMode()" style="font-size:0.8rem">Advanced: JVM args</button>
-                </div>
-                <input type="number" id="memory" value="2048" min="1024" max="16384" step="1024">
-                <textarea id="jvm-args" rows="4" spellcheck="false" placeholder="-Xms16G -Xmx16G&#10;-XX:+UseZGC -XX:+ZGenerational&#10;-XX:+AlwaysPreTouch -XX:+DisableExplicitGC" style="display:none;width:100%;box-sizing:border-box;font-family:monospace;font-size:0.85rem;resize:vertical"></textarea>
+            <div id="config-list" class="server-list" style="margin-top:8px">
+                <div class="empty">Loading…</div>
             </div>
-
-            <button id="start-btn" class="btn-primary" onclick="startServer()">Start</button>
         </div>
 
         <div id="tab-sessions" class="tab-content">

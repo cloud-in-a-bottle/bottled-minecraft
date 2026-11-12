@@ -18,13 +18,19 @@ from litestar.types import Scope
 from litestar.types import Send
 from loguru import logger
 
+from server.routes import api_create_save
 from server.routes import api_create_world
+from server.routes import api_delete_save
 from server.routes import api_dismiss
 from server.routes import api_downloaded_versions
+from server.routes import api_get_launch_settings
 from server.routes import api_import_world
 from server.routes import api_java_downloaded
 from server.routes import api_java_required
+from server.routes import api_list_saves
 from server.routes import api_modloader_versions
+from server.routes import api_run
+from server.routes import api_save_launch_settings
 from server.routes import api_server_command
 from server.routes import api_server_events
 from server.routes import api_server_logs
@@ -32,6 +38,7 @@ from server.routes import api_server_stats
 from server.routes import api_servers
 from server.routes import api_session_log
 from server.routes import api_sessions
+from server.routes import api_set_active_save
 from server.routes import api_start
 from server.routes import api_status
 from server.routes import api_stop
@@ -132,7 +139,14 @@ app = Litestar(
         api_update_world_jar,
         api_status,
         api_start,
+        api_run,
         api_stop,
+        api_get_launch_settings,
+        api_save_launch_settings,
+        api_list_saves,
+        api_create_save,
+        api_set_active_save,
+        api_delete_save,
     ],
     middleware=[_AccessLog],
     dependencies={"app_state": Provide(provide_app_state, sync_to_thread=False)},
