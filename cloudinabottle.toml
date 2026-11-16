@@ -1,6 +1,7 @@
 [app]
 name = "minecraft"
-version = "1.0.0"
+version = "1.0.1"
+release_tag_format = "semver"
 description = "A self-hosted minecraft server runner"
 
 [runtime.container]
